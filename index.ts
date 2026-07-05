@@ -2,11 +2,11 @@ import { z } from 'zod'
 import type { DatabaseSchema, TableInterface } from 'asasvirtuais/interface'
 
 export interface PrismaInterfaceOptions {
-    modelNameMapping?: Record<string, string> | ((tableName: string) => string)
+    modelMap?: Record<string, string> | ((table: string) => string)
 }
 
-function buildOperators(value: Record<string, any>): any {
-    const result: any = {}
+function buildOperators(value: Record<string, any>): Record<string, any> {
+    const result: Record<string, any> = {}
     for (const [op, opValue] of Object.entries(value)) {
         switch (op) {
             case '$ne':  result.not   = opValue; break
@@ -30,18 +30,16 @@ function isOperatorObject(value: any): boolean {
     )
 }
 
-export function buildWhere(query: any): any {
+export function buildWhere(query: any): Record<string, any> | undefined {
     if (!query || typeof query !== 'object') return undefined
 
-    const where: any = {}
+    const where: Record<string, any> = {}
 
     for (const [key, value] of Object.entries(query)) {
-        // Skip pagination/projection — handled separately by list()
         if (key === '$limit' || key === '$skip' || key === '$sort' || key === '$select') {
             continue
         }
 
-        // Logical operators → recurse into each sub-query
         if (key === '$or' && Array.isArray(value)) {
             where.OR = value.map(sub => buildWhere(sub))
             continue
@@ -51,13 +49,11 @@ export function buildWhere(query: any): any {
             continue
         }
 
-        // Field-level comparison operators like { priority: { $gt: 5 } }
         if (isOperatorObject(value)) {
             where[key] = buildOperators(value as Record<string, any>)
             continue
         }
 
-        // Direct equality match like { done: false }
         where[key] = value
     }
 
@@ -66,40 +62,43 @@ export function buildWhere(query: any): any {
 
 export function prismaInterface<Schema extends DatabaseSchema>(
     schema: Schema,
-    prisma: any,
-    options?: PrismaInterfaceOptions
+    prisma: Record<string, any>,
+    options?: PrismaInterfaceOptions,
 ): TableInterface<z.infer<Schema[keyof Schema]['readable']>, z.infer<Schema[keyof Schema]['writable']>> {
 
     const getModel = (table: string) => {
         if (!table) throw new Error('Table name must be provided.')
 
-        let modelKey: string | undefined
+        let modelName: string | undefined
 
-        if (options?.modelNameMapping) {
-            if (typeof options.modelNameMapping === 'function') {
-                modelKey = options.modelNameMapping(table)
-            } else if (typeof options.modelNameMapping === 'object') {
-                modelKey = options.modelNameMapping[table]
+        // 1. Try explicit user mapping first
+        if (options?.modelMap) {
+            if (typeof options.modelMap === 'function') {
+                modelName = options.modelMap(table)
+            } else if (typeof options.modelMap === 'object' && options.modelMap[table]) {
+                modelName = options.modelMap[table]
             }
         }
 
-        if (!modelKey) {
-            if (table in prisma) {
-                modelKey = table
-            } else {
-                const singular = table.endsWith('s') ? table.slice(0, -1) : table
-                const candidates = [table, singular]
-                modelKey = Object.keys(prisma).find(k =>
-                    candidates.some(c => c.toLowerCase() === k.toLowerCase())
-                )
-            }
+        // 2. Try exact match on Prisma Client
+        if (!modelName && prisma[table]) {
+            modelName = table
         }
 
-        const finalModelKey = modelKey || table
-        const model = prisma[finalModelKey]
-        if (!model) {
-            throw new Error(`Prisma model '${finalModelKey}' (mapped from table '${table}') not found on prisma client.`)
+        // 3. Fallback to automatic singular/case mapping (e.g. "todos" -> "todo" or "Todo")
+        if (!modelName) {
+            const singular = table.endsWith('s') ? table.slice(0, -1) : table
+            const candidates = [table, singular]
+            
+            // Search case-insensitively across Prisma Client model keys
+            modelName = Object.keys(prisma).find(key =>
+                candidates.some(c => c.toLowerCase() === key.toLowerCase())
+            )
         }
+
+        const finalModelName = modelName || table
+        const model = prisma[finalModelName]
+        if (!model) throw new Error(`Prisma model '${finalModelName}' (mapped from table '${table}') not found on prisma client.`)
         return model
     }
 
@@ -109,68 +108,62 @@ export function prismaInterface<Schema extends DatabaseSchema>(
     const methods = {
         async find({ table, id }) {
             if (!table) throw new Error('Table name must be provided.')
-            const model = getModel(table)
-            const record = await model.findUnique({ where: { id } })
-            if (!record) {
-                throw new Error(`Record with id ${id} not found in ${table}`)
-            }
+            const record = await getModel(table).findUnique({ where: { id } })
+            if (!record) throw new Error(`Record with id ${id} not found in ${table}`)
             return record as GenericReadable
         },
 
         async list({ table, query }) {
             if (!table) throw new Error('Table name must be provided.')
-            const model = getModel(table)
-            const args: any = {}
+            const { $limit, $skip, $sort, $select, ...filters } = query ?? {}
 
-            if (query) {
-                const { $limit, $skip, $sort, $select, ...filters } = query
+            const args: Record<string, any> = {}
 
-                const where = buildWhere(filters)
-                if (where) args.where = where
+            const where = buildWhere(filters)
+            if (where) args.where = where
 
-                if ($limit !== undefined) args.take = $limit
-                if ($skip  !== undefined) args.skip = $skip
-
-                if ($sort && typeof $sort === 'object') {
-                    args.orderBy = Object.entries($sort).map(([field, dir]) => ({
-                        [field]: dir === -1 ? 'desc' : 'asc'
-                    }))
-                }
-
-                if ($select && Array.isArray($select)) {
-                    const select: any = {}
-                    for (const field of $select) select[field as string] = true
-                    args.select = select
-                }
+            if ($sort && typeof $sort === 'object') {
+                args.orderBy = Object.entries($sort).map(([key, dir]) => ({
+                    [key]: dir === -1 ? 'desc' : 'asc'
+                }))
             }
 
-            return await model.findMany(args) as GenericReadable[]
+            if ($skip) {
+                args.skip = $skip
+            }
+            if ($limit) {
+                args.take = $limit
+            }
+
+            if ($select && Array.isArray($select)) {
+                const select: Record<string, boolean> = {}
+                for (const field of $select) select[field as string] = true
+                args.select = select
+            }
+
+            const results = await getModel(table).findMany(args)
+            return results as GenericReadable[]
         },
 
         async create({ table, data }) {
             if (!table) throw new Error('Table name must be provided.')
-            const model = getModel(table)
-            const record = await model.create({
-                data
-            })
+            const record = await getModel(table).create({ data })
             return record as GenericReadable
         },
 
         async update({ table, id, data }) {
             if (!table) throw new Error('Table name must be provided.')
-            const model = getModel(table)
-            const record = await model.update({
+            const record = await getModel(table).update({
                 where: { id },
-                data
+                data,
             })
             return record as GenericReadable
         },
 
         async remove({ table, id }) {
             if (!table) throw new Error('Table name must be provided.')
-            const model = getModel(table)
-            const record = await model.delete({
-                where: { id }
+            const record = await getModel(table).delete({
+                where: { id },
             })
             return record as GenericReadable
         },
