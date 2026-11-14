@@ -8,7 +8,7 @@ Prisma adapter for the `asasvirtuais` full-stack framework. It translates framew
 pnpm add asasvirtuais-prisma
 ```
 
-Ensure you have `@prisma/client` and `zod` installed in your project.
+Requires `asasvirtuais` v5+. Ensure you have `@prisma/client` and `zod` (v4.6+) installed in your project.
 
 ## Usage
 
@@ -23,26 +23,50 @@ import { PrismaClient } from '@prisma/client'
 export const prisma = new PrismaClient()
 ```
 
-### 2. Configure Database Interface
+### 2. Create the raw database interface
 
-Import the database schema and the Prisma Client instance to configure your framework server actions:
+The adapter is the raw interface over your database that `asasvirtuais` (v5+) expects in `app/db.ts`:
 
 ```typescript
-// app/actions.ts
-'use server'
-
-import { makeSchemaTableInterface } from 'asasvirtuais/interface'
+// app/db.ts
 import { prismaInterface } from 'asasvirtuais-prisma'
 import { prisma } from './prisma'
 import { schema } from './schema'
 
-// Initialize adapter
-const db = prismaInterface(schema, prisma)
+export const db = prismaInterface(schema, prisma)
+```
 
-export const { find, list, create, update, remove } = makeSchemaTableInterface(schema, null, {
-  find: async (props) => db.find(props),
-  list: async (props) => db.list(props),
-  create: async (props) => db.create(props),
+### 3. Expose it through the CRUD file
+
+Until the table middleware is written, `app/actions.ts` passes straight to it:
+
+```typescript
+// app/actions.ts
+'use server'
+import { db } from './db'
+
+export const { find, list, create, update, remove } = db
+```
+
+Each method receives the `table` it was called for, and the adapter routes it to the matching Prisma model.
+
+### 4. Table middleware
+
+When each table gets its business rules, wrap the same `db` with `makeSchemaTableInterface`:
+
+```typescript
+// packages/todos/middleware.ts
+import { makeSchemaTableInterface } from 'asasvirtuais/interface'
+import { db } from '@/app/db'
+import { schema } from './schema'
+
+export const todos = makeSchemaTableInterface({ todos: schema }, 'todos', {
+  find: (props) => db.find(props),
+  list: (props) => db.list(props),
+  create: async (props) => {
+    // pre-flight: authorization
+    return db.create(props)
+  },
   update: async (props) => db.update(props),
   remove: async (props) => db.remove(props),
 })!

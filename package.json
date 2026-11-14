@@ -1,6 +1,6 @@
 {
   "name": "asasvirtuais-prisma",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "type": "module",
   "main": "./index.ts",
   "exports": {
@@ -8,13 +8,13 @@
     "./package.json": "./package.json"
   },
   "dependencies": {
-    "asasvirtuais": "^4.0.1"
+    "asasvirtuais": "^5.1.2"
   },
   "peerDependencies": {
-    "zod": "^4.3.6",
+    "zod": "^4.6.5",
     "@prisma/client": ">=5.0.0"
   },
   "devDependencies": {
-    "zod": "^4.3.6"
+    "zod": "^4.6.5"
   }
 }
