@@ -8,7 +8,7 @@ Prisma adapter for the `asasvirtuais` full-stack framework. It translates framew
 pnpm add asasvirtuais-prisma
 ```
 
-Works with `asasvirtuais` v5 and v6. Ensure you have `@prisma/client` and `zod` (v4.6+) installed in your project.
+Requires `asasvirtuais` v6. Ensure you have `@prisma/client` and `zod` (v4.6+) installed in your project.
 
 ## Usage
 
@@ -52,7 +52,7 @@ Each method receives the `table` it was called for, and the adapter routes it to
 
 ### 4. Table middleware
 
-When each table gets its authorization rules, wrap the same `db` with `asasvirtuaisInterface` (asasvirtuais v6), typed
+When each table gets its authorization rules, wrap the same `db` with `asasvirtuaisInterface`, typed
 by the table's schema:
 
 ```typescript
