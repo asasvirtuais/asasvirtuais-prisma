@@ -8,7 +8,7 @@ Prisma adapter for the `asasvirtuais` full-stack framework. It translates framew
 pnpm add asasvirtuais-prisma
 ```
 
-Requires `asasvirtuais` v5+. Ensure you have `@prisma/client` and `zod` (v4.6+) installed in your project.
+Works with `asasvirtuais` v5 and v6. Ensure you have `@prisma/client` and `zod` (v4.6+) installed in your project.
 
 ## Usage
 
@@ -25,7 +25,7 @@ export const prisma = new PrismaClient()
 
 ### 2. Create the raw database interface
 
-The adapter is the raw interface over your database that `asasvirtuais` (v5+) expects in `app/db.ts`:
+The adapter is the raw interface over your database that `asasvirtuais` expects in `app/db.ts`:
 
 ```typescript
 // app/db.ts
@@ -52,25 +52,26 @@ Each method receives the `table` it was called for, and the adapter routes it to
 
 ### 4. Table middleware
 
-When each table gets its business rules, wrap the same `db` with `makeSchemaTableInterface`:
+When each table gets its authorization rules, wrap the same `db` with `asasvirtuaisInterface` (asasvirtuais v6), typed
+by the table's schema:
 
 ```typescript
 // packages/todos/middleware.ts
-import { makeSchemaTableInterface } from 'asasvirtuais/interface'
+import { asasvirtuaisInterface } from 'asasvirtuais/interface'
 import { db } from '@/app/db'
 import { schema } from './schema'
 
-export const todos = makeSchemaTableInterface({ todos: schema }, 'todos', {
-  find: (props) => db.find(props),
-  list: (props) => db.list(props),
-  create: async (props) => {
-    // pre-flight: authorization
-    return db.create(props)
-  },
-  update: async (props) => db.update(props),
-  remove: async (props) => db.remove(props),
-})!
+export const todos = asasvirtuaisInterface(schema, {
+  find: async (props) => { /* authorization */ return db.find(props) },
+  list: async (props) => { /* authorization */ return db.list(props) },
+  create: async (props) => { /* authorization */ return db.create(props) },
+  update: async (props) => { /* authorization */ return db.update(props) },
+  remove: async (props) => { /* authorization */ return db.remove(props) },
+})
 ```
+
+The middleware holds the table's authorization only. Writes to several tables at once go in a custom server action
+with a transaction, which calls `db` directly.
 
 ---
 
